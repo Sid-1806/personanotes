@@ -7,8 +7,11 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 from app.db.database import Base
-from app.models.user import User
-from app.models.lecture import Lecture
+
+# Import the models package so every table registers on Base.metadata.
+# Importing only a couple of models would make --autogenerate blind to the
+# rest and propose dropping them.
+import app.models  # noqa: F401
 from app.core.config import settings
 
 config = context.config

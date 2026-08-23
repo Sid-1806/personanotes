@@ -32,8 +32,10 @@ async def app_error_handler(request: Request, exc: AppError):
 
 
 async def global_exception_handler(request: Request, exc: Exception):
+    # Log the full exception server-side; return a generic message so internal
+    # details (stack traces, DSNs, driver errors) are never exposed to clients.
     logger.exception(f"Unhandled Exception on {request.url.path}: {str(exc)}")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": f"An unexpected error occurred: {str(exc)}"},
+        content={"detail": "An internal server error occurred."},
     )

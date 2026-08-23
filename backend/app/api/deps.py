@@ -8,7 +8,6 @@ from sqlalchemy.future import select
 from app.db.database import SessionLocal
 from app.core.config import settings
 from app.models.user import User
-from app.schemas.token import TokenData
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/login")
 
@@ -30,14 +29,14 @@ async def get_current_user(
         payload = jwt.decode(
             token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
         )
-        email: str | None = payload.get("sub")
-        if email is None:
+        subject = payload.get("sub")
+        if subject is None:
             raise credentials_exception
-        token_data = TokenData(email=email)
-    except JWTError:
+        user_id = int(subject)  # token subject is the immutable user id
+    except (JWTError, ValueError):
         raise credentials_exception
 
-    result = await db.execute(select(User).where(User.email == token_data.email))
+    result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalars().first()
     if user is None:
         raise credentials_exception

@@ -10,6 +10,7 @@ from app.models.lecture import Lecture
 from app.models.feedback import GeneratedNote, EditedNote, StyleFeedback
 from app.models.style import StyleProfile, StyleProfileVersion
 from app.models.historical import HistoricalNote
+from app.evaluation.analytics import calculate_improvement_insights
 
 router = APIRouter()
 
@@ -127,8 +128,50 @@ async def get_dashboard_summary(
         "style_versions": style_versions_count.scalar() or 0,
     }
 
-    # 5. Personalization Score (mean confidence across learned style features)
-    personalization_metrics = {"current_score": personalization_score, "trend": 0}
+    # 5. Personalization score + trend from the wired evaluation loop.
+    #    Each feedback event stores an evaluate_generation() result in
+    #    StyleFeedback.feedback_json["evaluation"]; we read that time-ordered
+    #    history to report the latest score and whether it is improving.
+    fb_stmt = (
+        select(StyleFeedback.feedback_json, StyleFeedback.created_at)
+        .join(GeneratedNote, StyleFeedback.generated_note_id == GeneratedNote.id)
+        .where(GeneratedNote.user_id == current_user.id)
+        .order_by(StyleFeedback.created_at)
+    )
+    fb_res = await db.execute(fb_stmt)
+    eval_history = []
+    for fjson, _created in fb_res.all():
+        ev = (fjson or {}).get("evaluation")
+        if isinstance(ev, dict) and "personalization_score" in ev:
+            eval_history.append(ev)
+
+    if eval_history:
+        current = round(eval_history[-1]["personalization_score"])
+        trend = round(
+            eval_history[-1]["personalization_score"]
+            - eval_history[0]["personalization_score"]
+        )
+        insights = (
+            calculate_improvement_insights(eval_history)
+            if len(eval_history) >= 2
+            else []
+        )
+        personalization_metrics = {
+            "current_score": current,
+            "trend": trend,
+            "measured": True,
+            "feedback_sessions": len(eval_history),
+            "insights": insights,
+        }
+    else:
+        # No feedback yet -> fall back to the mean-confidence proxy.
+        personalization_metrics = {
+            "current_score": personalization_score,
+            "trend": 0,
+            "measured": False,
+            "feedback_sessions": 0,
+            "insights": [],
+        }
 
     # 6. Activity Feed
     activity_feed = []

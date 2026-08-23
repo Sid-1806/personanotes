@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 import shutil
 import os
+import uuid
 
 from app.api import deps
 from app.models.user import User
@@ -176,7 +177,9 @@ async def analyze_style(
     file: UploadFile = File(...), current_user: User = Depends(deps.get_current_user)
 ):
     """Analyze an uploaded document and infer the style profile without saving."""
-    filepath = os.path.join(UPLOAD_DIR, file.filename)
+    # Sanitize the client-supplied filename to prevent path traversal.
+    safe_name = f"{uuid.uuid4().hex}_{os.path.basename(file.filename)}"
+    filepath = os.path.join(UPLOAD_DIR, safe_name)
     try:
         with open(filepath, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)

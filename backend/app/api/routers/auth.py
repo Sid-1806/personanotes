@@ -78,5 +78,6 @@ async def login_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    access_token = create_access_token(subject=user.email)
+    # Use the immutable user id as the token subject (not the mutable email).
+    access_token = create_access_token(subject=user.id)
     return {"access_token": access_token, "token_type": "bearer"}

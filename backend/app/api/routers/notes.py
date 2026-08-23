@@ -95,6 +95,7 @@ class FeedbackRequest(BaseModel):
 
 class FeedbackResponse(BaseModel):
     updated_features: list[str]
+    personalization_score: float | None = None
 
 
 @router.post("/{id}/feedback", response_model=FeedbackResponse)
@@ -111,6 +112,7 @@ async def submit_note_feedback(
     from app.feedback.style_feedback import generate_style_feedback
     from app.feedback.updater import apply_feedback_to_profile
     from app.style.schema import StyleProfileSchema
+    from app.evaluation.engine import evaluate_generation
 
     # 1. Load generated note
     result = await db.execute(
@@ -128,6 +130,14 @@ async def submit_note_feedback(
         generated_note.generated_markdown,
         request.edited_markdown,
     )
+
+    # 2b. Evaluate this generation (deterministic style-similarity, 0-100). This
+    # wires the evaluation loop: the score is stored per feedback so the dashboard
+    # can show whether generations need fewer edits over time. Fast/pure -> no offload.
+    eval_result = evaluate_generation(
+        generated_note.generated_markdown, request.edited_markdown
+    )
+    feedback_data["evaluation"] = eval_result
 
     # Save edited note and feedback records
     edited_note = EditedNote(
@@ -171,4 +181,7 @@ async def submit_note_feedback(
 
     await db.commit()
 
-    return FeedbackResponse(updated_features=updated_features)
+    return FeedbackResponse(
+        updated_features=updated_features,
+        personalization_score=eval_result.get("personalization_score"),
+    )

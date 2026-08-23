@@ -1,4 +1,5 @@
 import os
+import uuid
 import aiofiles
 from typing import List, Tuple
 from fastapi import UploadFile
@@ -19,7 +20,9 @@ async def import_files(files: List[UploadFile]) -> List[Tuple[str, str, str]]:
         if not file.filename:
             continue
 
-        filepath = os.path.join(UPLOAD_DIR, file.filename)
+        # Sanitize the client-supplied filename to prevent path traversal.
+        safe_name = f"{uuid.uuid4().hex}_{os.path.basename(file.filename)}"
+        filepath = os.path.join(UPLOAD_DIR, safe_name)
 
         # Save to disk
         async with aiofiles.open(filepath, "wb") as out_file:
