@@ -24,6 +24,15 @@ services:
       - qdrant_data:/qdrant/storage
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    container_name: personanotes_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
@@ -34,6 +43,7 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://user:password@postgres:5432/personanotes
       - QDRANT_URL=http://qdrant:6333
+      - REDIS_URL=redis://redis:6379/0
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - SECRET_KEY=demo_secret_key_change_in_production
       - POSTGRES_USER=user
@@ -44,6 +54,7 @@ services:
     depends_on:
       - postgres
       - qdrant
+      - redis
     restart: unless-stopped
 
   frontend:
@@ -62,3 +73,4 @@ services:
 volumes:
   postgres_data:
   qdrant_data:
+  redis_data:

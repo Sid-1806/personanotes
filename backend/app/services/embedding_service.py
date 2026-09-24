@@ -22,6 +22,25 @@ def get_text_chunks(text: str) -> list[str]:
     return text_splitter.split_text(text)
 
 
+def get_chunks_with_pages(pages: list[str]) -> tuple[list[str], list[int]]:
+    """Chunk a document page by page, returning each chunk's 1-based page number.
+
+    Chunking per page rather than across the whole document keeps provenance
+    exact — a chunk never straddles a page boundary, so the page number attached
+    to it is always the page it actually came from. Pages are usually far larger
+    than the chunk size, so this costs nothing in retrieval quality.
+    """
+    chunks: list[str] = []
+    page_numbers: list[int] = []
+    for index, page_text in enumerate(pages, start=1):
+        if not page_text or not page_text.strip():
+            continue
+        for chunk in text_splitter.split_text(page_text):
+            chunks.append(chunk)
+            page_numbers.append(index)
+    return chunks, page_numbers
+
+
 def generate_embeddings(chunks: list[str]) -> list[list[float]]:
     """Generate dense vector embeddings for a list of text chunks."""
     if not chunks:

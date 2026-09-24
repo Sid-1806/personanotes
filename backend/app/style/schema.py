@@ -10,6 +10,10 @@ class FeatureValue(BaseModel, Generic[T]):
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     reason: str = Field(default="Initial inference.")
     last_updated: Optional[str] = None
+    observations: int = 0  # evidence count; drives confidence + convergence
+    # When true the user has fixed this value by hand; the learning rule
+    # leaves it alone so their explicit choice is never silently overwritten.
+    pinned: bool = False
 
 
 class StyleProfileSchema(BaseModel):
@@ -79,6 +83,19 @@ class AnalyzeStyleRequest(BaseModel):
 
 class UpdateStyleRequest(BaseModel):
     profile: StyleProfileSchema
+
+
+class AttributeOverrideRequest(BaseModel):
+    """Set one attribute by hand from the Style page."""
+
+    value: Any
+    pinned: bool = True
+
+
+class AttributeResetRequest(BaseModel):
+    """Clear a hand-set attribute (or the whole profile when feature is None)."""
+
+    feature: Optional[str] = None
 
 
 class StyleResponse(BaseModel):

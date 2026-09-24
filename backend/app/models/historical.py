@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Enum
+from sqlalchemy import Column, Integer, Float, String, ForeignKey, DateTime, Enum
 from sqlalchemy.sql import func
 from app.db.database import Base
 import enum
@@ -21,3 +21,5 @@ class HistoricalNote(Base):
     source = Column(Enum(NoteSourceEnum), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     analysis_status = Column(String, default="pending")
+    # How much this source influenced the profile, for the Style > Sources UI.
+    contribution_weight = Column(Float, nullable=False, server_default="0")

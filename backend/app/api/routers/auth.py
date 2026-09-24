@@ -1,5 +1,7 @@
 from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -13,7 +15,15 @@ from app.schemas.token import Token
 router = APIRouter()
 
 
-@router.post("/register", response_model=UserResponse)
+class RegisterResponse(BaseModel):
+    """A new account plus its session token."""
+
+    user: UserResponse
+    access_token: str
+    token_type: str = "bearer"
+
+
+@router.post("/register", response_model=RegisterResponse)
 async def register_user(
     user_in: UserCreate, db: AsyncSession = Depends(deps.get_db)
 ) -> Any:
@@ -25,8 +35,9 @@ async def register_user(
         db (AsyncSession): The database session.
 
     Returns:
-        Any: The newly created User record serialized by UserResponse.
-    
+        Any: The new user plus an access token, so the client can go straight
+        into onboarding instead of bouncing the user to a login form.
+
     Raises:
         HTTPException: If the email is already registered.
     """
@@ -48,7 +59,14 @@ async def register_user(
     db.add(new_user)
     await db.commit()
     await db.refresh(new_user)
-    return new_user
+
+    # Sign the user in immediately. Making someone re-enter credentials they
+    # typed five seconds ago adds a step and no security.
+    return RegisterResponse(
+        user=UserResponse.model_validate(new_user),
+        access_token=create_access_token(subject=new_user.id),
+        token_type="bearer",
+    )
 
 
 @router.post("/login", response_model=Token)

@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 if settings.GEMINI_API_KEY:
     genai.configure(api_key=settings.GEMINI_API_KEY)
 
-feedback_model = genai.GenerativeModel("gemini-2.5-flash")
+feedback_model = genai.GenerativeModel(settings.GEMINI_MODEL)
 
 
 def get_subjective_feedback(original_md: str, edited_md: str) -> Dict[str, Any]:

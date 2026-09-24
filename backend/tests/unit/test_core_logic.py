@@ -7,11 +7,14 @@ These cover the deterministic core without needing Postgres, Qdrant, or Gemini.
 from app.style.schema import StyleProfileSchema, FeatureValue
 from app.style.updater import merge_profiles
 from app.style.prompt_format import summarize_style_for_prompt
-from app.feedback.updater import apply_feedback_to_profile, LEARNING_RATE
+from app.style.learning import observe_numeric, observe_categorical, N_CONFIDENT
+from app.feedback.updater import apply_feedback_to_profile
 from app.feedback.feature_extractor import extract_features
 from app.feedback.diff_engine import compare_features
 from app.evaluation.engine import evaluate_generation
 from app.historical_notes.merger import merge_historical_analysis
+from app.feedback.summary import humanize_changes
+from app.services.ocr_utils import needs_ocr
 
 
 # --- Schema ---------------------------------------------------------------
@@ -33,9 +36,9 @@ def test_profile_round_trips_through_json():
 
 # --- merge_profiles -------------------------------------------------------
 
-def test_merge_averages_numeric_prefers_new_categorical_unions_lists():
+def test_merge_adopts_new_on_first_evidence_and_unions_lists():
     existing = StyleProfileSchema()
-    existing.average_sentence_length.value = 10.0
+    existing.average_sentence_length.value = 10.0   # observations 0 (no evidence yet)
     existing.tone.value = "Academic"
     existing.section_order.value = ["Intro"]
 
@@ -46,22 +49,66 @@ def test_merge_averages_numeric_prefers_new_categorical_unions_lists():
 
     merged = merge_profiles(existing.model_dump(), incoming)
 
-    assert merged["average_sentence_length"]["value"] == 15.0     # moving average
-    assert merged["tone"]["value"] == "Casual"                     # prefer newest
+    # First observation adopts the observed value (running mean, step = 1/1).
+    assert merged["average_sentence_length"]["value"] == 20.0
+    assert merged["average_sentence_length"]["observations"] == 1
+    assert merged["tone"]["value"] == "Casual"                     # newest observation
     assert set(merged["section_order"]["value"]) == {"Intro", "Summary"}  # union
-    # result must still parse back into the schema
     assert StyleProfileSchema(**merged) is not None
+
+
+def test_merge_converges_toward_a_mean_after_evidence():
+    existing = StyleProfileSchema()
+    existing.average_sentence_length.value = 10.0
+    existing.average_sentence_length.observations = 1  # already one observation
+
+    incoming = StyleProfileSchema()
+    incoming.average_sentence_length.value = 20.0
+
+    merged = merge_profiles(existing.model_dump(), incoming)
+
+    # Second observation moves halfway (step = 1/2), not all the way to 20.
+    assert merged["average_sentence_length"]["value"] == 15.0
+    assert merged["average_sentence_length"]["observations"] == 2
 
 
 # --- apply_feedback_to_profile -------------------------------------------
 
-def test_numeric_feedback_is_confidence_weighted():
-    profile = StyleProfileSchema()  # average_sentence_length starts at 15.0, confidence 0.5
-    result = apply_feedback_to_profile(
-        profile, {"changes": [{"feature": "average_sentence_length", "delta": 4.0}]}
+def test_numeric_feedback_adopts_observed_value_then_converges():
+    profile = StyleProfileSchema()  # average_sentence_length starts at 15.0, no evidence
+
+    # First edit: observed absolute value is adopted (running mean, step = 1/1).
+    profile = apply_feedback_to_profile(
+        profile, {"changes": [{"feature": "average_sentence_length", "observed": 25.0}]}
     )
-    weight = LEARNING_RATE * (1 - 0.5 + 0.1)  # 0.2 * 0.6 = 0.12
-    assert result.average_sentence_length.value == 15.0 + 4.0 * weight  # 15.48
+    assert profile.average_sentence_length.value == 25.0
+    assert profile.average_sentence_length.observations == 1
+
+    # Second edit toward a lower value: moves halfway (step = 1/2), not fully.
+    profile = apply_feedback_to_profile(
+        profile, {"changes": [{"feature": "average_sentence_length", "observed": 15.0}]}
+    )
+    assert profile.average_sentence_length.value == 20.0
+    assert profile.average_sentence_length.observations == 2
+
+
+def test_confidence_grows_with_evidence():
+    feat = FeatureValue(value=15.0)     # fresh feature, no evidence
+    feat = observe_numeric(feat, 18.0, "obs")   # first real observation
+    prev = feat.confidence
+    for _ in range(N_CONFIDENT + 2):
+        feat = observe_numeric(feat, 18.0, "obs")
+        assert feat.confidence >= prev  # monotonically non-decreasing with evidence
+        prev = feat.confidence
+    assert feat.confidence == 1.0       # saturates once enough evidence accrues
+
+
+def test_categorical_change_resets_then_reinforces_confidence():
+    feat = StyleProfileSchema().tone
+    changed = observe_categorical(feat, "Casual", "switched")
+    reinforced = observe_categorical(changed, "Casual", "again")
+    assert reinforced.value == "Casual"
+    assert reinforced.confidence > changed.confidence  # agreement builds confidence
 
 
 def test_categorical_feedback_switches_value():
@@ -155,6 +202,39 @@ def test_historical_merge_learns_numeric_features_with_high_confidence():
         "subjective_traits": [],
     }
     profile = merge_historical_analysis(StyleProfileSchema(), aggregated, note_count=3)
-    assert profile.average_sentence_length.value != 15.0        # moved from default
-    assert profile.average_sentence_length.confidence >= 0.8    # anchored high
+    assert profile.average_sentence_length.value == 18.0        # adopted the corpus mean
+    assert profile.average_sentence_length.observations == 3    # counted 3 notes of evidence
+    assert profile.average_sentence_length.confidence >= 0.4    # confidence reflects evidence
     assert profile.example_density.value == "High"              # >50% had examples
+
+
+# --- humanized feedback summary ------------------------------------------
+
+def test_humanize_translates_changes_to_sentences():
+    feedback = {
+        "changes": [
+            {"feature": "average_sentence_length", "delta": -3.0},
+            {"feature": "bullet_frequency", "delta": 2.0},
+            {"feature": "summary_position", "new": "End"},
+            {"feature": "tone", "new": "Casual"},
+        ]
+    }
+    out = humanize_changes(feedback)
+    assert any("shorter" in s for s in out)
+    assert any("bullet points" in s for s in out)
+    assert any("summary section" in s for s in out)
+    assert any("Casual" in s for s in out)
+    assert any(s.startswith("Confidence increased for:") for s in out)
+
+
+def test_humanize_empty_changes_returns_empty_list():
+    assert humanize_changes({"changes": []}) == []
+
+
+# --- OCR fallback decision ------------------------------------------------
+
+def test_needs_ocr_detects_sparse_text():
+    assert needs_ocr("") is True
+    assert needs_ocr("   \n  ") is True
+    assert needs_ocr("only a handful of words") is True   # < 40 chars
+    assert needs_ocr("x" * 100) is False

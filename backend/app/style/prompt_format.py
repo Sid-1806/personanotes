@@ -30,8 +30,14 @@ def summarize_style_for_prompt(style_profile: Dict[str, Any]) -> str:
 
         if isinstance(feat, dict) and "value" in feat:
             confidence = feat.get("confidence")
-            # Skip features we have not actually learned yet (default inference).
-            if confidence is not None and confidence <= 0.5:
+            observations = feat.get("observations", 0) or 0
+            # A feature is "learned" if we have observed it at least once, or (for
+            # legacy profiles without an observation count) if confidence rose
+            # above the default. Otherwise it is still an unlearned default.
+            is_learned = observations >= 1 or (
+                confidence is not None and confidence > 0.5
+            )
+            if not is_learned:
                 continue
             value = feat.get("value")
         else:

@@ -28,8 +28,7 @@ def compare_features(original_md: str, edited_md: str) -> List[Dict[str, Any]]:
                 {
                     "feature": feature_name,
                     "delta": round(delta, 2),
-                    "original": round(orig[metric_name], 2),
-                    "edited": round(edited[metric_name], 2),
+                    "observed": round(edited[metric_name], 2),  # absolute edited value
                 }
             )
 
@@ -49,6 +48,7 @@ def compare_features(original_md: str, edited_md: str) -> List[Dict[str, Any]]:
             {
                 "feature": "code_block_frequency",
                 "delta": round(code_edit - code_orig, 2),
+                "observed": round(code_edit, 2),
             }
         )
 
@@ -59,6 +59,7 @@ def compare_features(original_md: str, edited_md: str) -> List[Dict[str, Any]]:
             {
                 "feature": "bullet_frequency",
                 "delta": round(bullet_edit - bullet_orig, 2),
+                "observed": round(bullet_edit, 2),
             }
         )
 
@@ -69,6 +70,7 @@ def compare_features(original_md: str, edited_md: str) -> List[Dict[str, Any]]:
             {
                 "feature": "table_frequency",
                 "delta": round(table_edit - table_orig, 2),
+                "observed": round(table_edit, 2),
             }
         )
 
@@ -79,6 +81,7 @@ def compare_features(original_md: str, edited_md: str) -> List[Dict[str, Any]]:
             {
                 "feature": "diagram_frequency",
                 "delta": round(diagram_edit - diagram_orig, 2),
+                "observed": round(diagram_edit, 2),
             }
         )
 

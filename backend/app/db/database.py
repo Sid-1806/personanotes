@@ -28,3 +28,17 @@ SessionLocal = async_sessionmaker(
 
 class Base(DeclarativeBase):
     pass
+
+
+# A synchronous engine/session for background workers that run in a threadpool
+# (they can't use the async session). Uses the psycopg2 driver.
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+SYNC_DATABASE_URL = (
+    os.getenv("DATABASE_URL", "")
+    .replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+    .replace("postgresql://", "postgresql+psycopg2://")
+)
+sync_engine = create_engine(SYNC_DATABASE_URL)
+SyncSessionLocal = sessionmaker(bind=sync_engine, autoflush=False, autocommit=False)

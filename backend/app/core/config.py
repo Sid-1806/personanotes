@@ -32,7 +32,9 @@ class Settings(BaseSettings):
 
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    # A 30-minute token was shorter than a study session: it expired mid-edit
+    # and the client's hard redirect discarded whatever was in the editor.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7
 
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
@@ -46,6 +48,28 @@ class Settings(BaseSettings):
     QDRANT_COLLECTION_NAME: str = "lecture_notes"
 
     GEMINI_API_KEY: str = ""
+    # The generation model, in one place. Google retires model names and
+    # stops serving old ones to new API keys, which hardcoding turns into a
+    # total outage; this makes it a config change instead of a code change.
+    GEMINI_MODEL: str = "gemini-3.6-flash"
+
+    # OCR fallback for scanned PDFs / image uploads (via Gemini multimodal).
+    OCR_ENABLED: bool = True
+
+    # Redis powers response caching + rate limiting. If unset, both fall back to
+    # an in-process backend so the app still runs with no extra infrastructure.
+    REDIS_URL: str | None = None
+
+    # Response caching for the expensive generation path.
+    CACHE_ENABLED: bool = True
+    GENERATION_CACHE_TTL: int = 3600  # seconds a generated note stays cached
+
+    # Per-user rate limiting on the LLM endpoints (Gemini is the cost bottleneck).
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_WINDOW_SECONDS: int = 60
+    RATE_LIMIT_GENERATE: int = 20  # generate calls per user per window
+    RATE_LIMIT_REFINE: int = 30    # refine calls per user per window
+    RATE_LIMIT_CHAT: int = 40      # chat turns per user per window
 
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"

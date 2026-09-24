@@ -1,5 +1,7 @@
 from typing import Any, Dict
 from app.style.schema import StyleProfileSchema
+from app.style.features import NUMERIC_FEATURES
+from app.style.learning import observe_numeric, observe_categorical
 import logging
 
 logger = logging.getLogger(__name__)
@@ -26,7 +28,8 @@ def merge_profiles(
         logger.warning("Existing style profile could not be parsed; using defaults.")
         current = StyleProfileSchema()
 
-    # 1. Categorical / string fields: prefer the newest inference (carry its metadata).
+    # 1. Categorical / string fields: treat the new inference as an observation
+    #    (repeated agreement builds confidence; a change re-opens the belief).
     for field in (
         "heading_style",
         "bullet_style",
@@ -36,21 +39,14 @@ def merge_profiles(
     ):
         cur = getattr(current, field)
         new = getattr(new_profile, field)
-        cur.value = new.value
-        cur.reason = new.reason
-        cur.confidence = new.confidence
-        cur.last_updated = new.last_updated
+        setattr(current, field, observe_categorical(cur, new.value, new.reason))
 
-    # 2. Numeric metrics: moving average of the two values.
-    for field in (
-        "average_sentence_length",
-        "diagram_frequency",
-        "table_frequency",
-        "code_block_frequency",
-    ):
+    # 2. Numeric metrics: evidence-based running mean toward the new value.
+    #    Covers every numeric feature via the single source of truth.
+    for field in NUMERIC_FEATURES:
         cur = getattr(current, field)
         new = getattr(new_profile, field)
-        cur.value = (cur.value + new.value) / 2
+        setattr(current, field, observe_numeric(cur, new.value, new.reason))
 
     # 3. List fields: union of unique items, preserving order.
     for field in ("section_order", "preferred_sections"):

@@ -11,12 +11,17 @@ logger = logging.getLogger(__name__)
 if settings.GEMINI_API_KEY:
     genai.configure(api_key=settings.GEMINI_API_KEY)
 
-analysis_model = genai.GenerativeModel("gemini-2.5-flash")
+analysis_model = genai.GenerativeModel(settings.GEMINI_MODEL)
 
 
 def _fv(value, reason: str = "Inferred from uploaded note."):
-    """Wrap a raw analyzed value into a FeatureValue for the style schema."""
-    return FeatureValue(value=value, confidence=0.6, reason=reason)
+    """Wrap a raw analyzed value into a FeatureValue for the style schema.
+
+    Bootstraps with one observation so the feature counts as *learned* (and is
+    surfaced to the generation prompt) while remaining open to convergence as
+    real edits arrive.
+    """
+    return FeatureValue(value=value, confidence=0.6, reason=reason, observations=1)
 
 
 def _profile_from_flat(data: dict) -> StyleProfileSchema:

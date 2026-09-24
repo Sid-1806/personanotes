@@ -1,8 +1,15 @@
+import logging
+
 import fitz  # PyMuPDF
 from pathlib import Path
 from pydantic import BaseModel
 from typing import List, Dict, Any
 import re
+
+from app.core.config import settings
+from app.services.ocr_utils import needs_ocr
+
+logger = logging.getLogger(__name__)
 
 
 class ParsedDocument(BaseModel):
@@ -13,11 +20,14 @@ class ParsedDocument(BaseModel):
         text (str): The full raw text of the document.
         headings (List[str]): Extracted headings.
         paragraphs (List[str]): Extracted paragraphs.
+        pages (List[str]): Per-page text, so chunks can carry a page number and
+            citations can say "Lecture 4, p.7" instead of showing an opaque excerpt.
         metadata (Dict[str, Any]): Additional extracted metadata (e.g., line count).
     """
     text: str
     headings: List[str] = []
     paragraphs: List[str] = []
+    pages: List[str] = []
     metadata: Dict[str, Any] = {}
 
 
@@ -74,16 +84,54 @@ def extract_from_pdf(filepath: str) -> ParsedDocument:
     Returns:
         ParsedDocument: The parsed structure containing the text and metadata.
     """
-    text = ""
+    pages: List[str] = []
     try:
         doc = fitz.open(filepath)
         for page in doc:
-            text += page.get_text("text") + "\n\n"
+            pages.append(page.get_text("text"))
+        text = "\n\n".join(pages)
+
+        # Scanned / image-only PDFs yield little extractable text -> OCR each page.
+        if settings.OCR_ENABLED and needs_ocr(text):
+            from app.services.ocr_service import ocr_image_bytes
+
+            ocr_pages = []
+            for page in doc:
+                pix = page.get_pixmap(dpi=150)
+                ocr_pages.append(ocr_image_bytes(pix.tobytes("png")))
+            if any(p.strip() for p in ocr_pages):
+                pages = ocr_pages
+                text = "\n\n".join(pages)
+
         doc.close()
     except Exception as e:
-        print(f"Error parsing PDF {filepath}: {e}")
+        logger.error(f"Error parsing PDF {filepath}: {e}")
+        text = "\n\n".join(pages)
 
-    return extract_structure_from_text(text)
+    parsed = extract_structure_from_text(text)
+    # Keeping per-page text lets the chunker attach a page number to each chunk,
+    # so a citation can say "p.7" instead of showing an anonymous excerpt.
+    parsed.pages = pages
+    parsed.metadata["page_count"] = len(pages)
+    return parsed
+
+
+def extract_from_image(filepath: str) -> ParsedDocument:
+    """Extract text from an image file via OCR (Gemini multimodal)."""
+    text = ""
+    if settings.OCR_ENABLED:
+        from app.services.ocr_service import ocr_image_bytes
+
+        mime = "image/jpeg" if filepath.lower().endswith((".jpg", ".jpeg")) else "image/png"
+        try:
+            with open(filepath, "rb") as f:
+                text = ocr_image_bytes(f.read(), mime_type=mime)
+        except Exception as e:
+            logger.error(f"Error OCR-ing image {filepath}: {e}")
+    parsed = extract_structure_from_text(text)
+    parsed.pages = [text]
+    parsed.metadata["page_count"] = 1
+    return parsed
 
 
 def extract_from_text_file(filepath: str) -> ParsedDocument:
@@ -100,10 +148,13 @@ def extract_from_text_file(filepath: str) -> ParsedDocument:
         with open(filepath, "r", encoding="utf-8") as f:
             text = f.read()
     except Exception as e:
-        print(f"Error parsing text file {filepath}: {e}")
+        logger.error(f"Error parsing text file {filepath}: {e}")
         text = ""
 
-    return extract_structure_from_text(text)
+    parsed = extract_structure_from_text(text)
+    parsed.pages = [text]
+    parsed.metadata["page_count"] = 1
+    return parsed
 
 
 def parse_document(filepath: str, filetype: str = "") -> ParsedDocument:
@@ -121,6 +172,8 @@ def parse_document(filepath: str, filetype: str = "") -> ParsedDocument:
 
     if extension == ".pdf" or "pdf" in filetype:
         return extract_from_pdf(filepath)
+    elif extension in [".png", ".jpg", ".jpeg"] or "image" in filetype:
+        return extract_from_image(filepath)
     elif extension in [".txt", ".md"] or "text" in filetype or "markdown" in filetype:
         return extract_from_text_file(filepath)
     else:
